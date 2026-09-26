@@ -3,21 +3,34 @@ import { parsePromptToShapes, type SvgShape } from './parser';
 
 const STORAGE_KEY = 'svg-maker-kb-projects';
 
-const makeDefaultShape = (): SvgShape => ({
-  id: crypto.randomUUID(),
-  type: 'rect',
-  x: 120,
-  y: 80,
-  width: 220,
-  height: 140,
-  fill: '#4f46e5',
-  stroke: '#1f2937',
-  strokeWidth: 3,
-  r: 18,
-  text: 'SVG',
-  fontSize: 42,
-  opacity: 1,
-});
+const makeDefaultShape = (type: SvgShape['type'] = 'rect'): SvgShape => {
+  const base = {
+    id: crypto.randomUUID(),
+    type,
+    x: 120,
+    y: 80,
+    fill: '#4f46e5',
+    stroke: '#1f2937',
+    strokeWidth: 3,
+    opacity: 1,
+    text: 'SVG',
+    fontSize: 42,
+  } as SvgShape;
+
+  if (type === 'circle') {
+    return { ...base, type: 'circle', x: 360, y: 260, r: 110 };
+  }
+
+  if (type === 'line') {
+    return { ...base, type: 'line', x: 90, y: 250, width: 420, height: 0, stroke: '#111827', fill: '#111827' };
+  }
+
+  if (type === 'text') {
+    return { ...base, type: 'text', x: 260, y: 260, fill: '#111827', stroke: '#111827', strokeWidth: 0, fontSize: 48 };
+  }
+
+  return { ...base, type: 'rect', width: 220, height: 140, r: 20 };
+};
 
 const sampleProject = () => ({
   id: crypto.randomUUID(),
@@ -61,55 +74,83 @@ const defaultProject = sampleProject();
 function App() {
   const [projectName, setProjectName] = useState(defaultProject.name);
   const [items, setItems] = useState<SvgShape[]>(defaultProject.items);
+  const [history, setHistory] = useState<SvgShape[][]>([defaultProject.items]);
+  const [historyCursor, setHistoryCursor] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(defaultProject.items[0]?.id ?? null);
   const [prompt, setPrompt] = useState('красный круг в центре, синий квадрат слева');
-  const [projectList, setProjectList] = useState<Array<{ id: string; name: string }>>([]);
+  const [projectList, setProjectList] = useState<Array<{ id: string; name: string; items: SvgShape[] }>>([]);
   const [activeTab, setActiveTab] = useState<'editor' | 'prompt' | 'ai'>('editor');
+
+  const selectedShape = items.find((shape) => shape.id === selectedId) ?? null;
+
+  const commitItems = (nextItems: SvgShape[]) => {
+    setItems(nextItems);
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyCursor + 1);
+      const nextHistory = [...trimmed, nextItems];
+      const limited = nextHistory.slice(-30);
+      setHistoryCursor(limited.length - 1);
+      return limited;
+    });
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as Array<{ id: string; name: string; items: SvgShape[] }>;
-        if (parsed.length > 0) {
-          const first = parsed[0];
-          setProjectList(parsed.map((p) => ({ id: p.id, name: p.name })));
-          setProjectName(first.name);
-          setItems(first.items);
-        }
-      } catch {
-        // ignore invalid JSON
-      }
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as Array<{ id: string; name: string; items: SvgShape[] }>;
+      if (!parsed.length) return;
+
+      const first = parsed[0];
+      setProjectList(parsed);
+      setProjectName(first.name);
+      setItems(first.items);
+      setHistory([first.items]);
+      setHistoryCursor(0);
+      setSelectedId(first.items[0]?.id ?? null);
+    } catch {
+      // ignore invalid JSON
     }
   }, []);
 
   useEffect(() => {
-    const docs = projectList.map((project) => ({
-      id: project.id,
-      name: project.name,
-      items,
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
-  }, [items, projectList]);
+    const projectDocs = projectList.length ? projectList : [{ id: crypto.randomUUID(), name: projectName || 'Новый проект', items }];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projectDocs));
+  }, [items, projectName, projectList]);
 
   const svgMarkup = useMemo(() => buildSvgMarkup(items, 800, 600), [items]);
 
-  const addShape = (shape: SvgShape) => {
-    setItems((current) => [...current, shape]);
+  const addShape = (type: SvgShape['type']) => {
+    const next = [...items, makeDefaultShape(type)];
+    commitItems(next);
+    setSelectedId(next[next.length - 1].id);
   };
 
   const generateFromPrompt = () => {
     const parsedShapes = parsePromptToShapes(prompt);
-    if (parsedShapes.length === 0) {
-      setItems([makeDefaultShape()]);
-      return;
-    }
-    setItems(parsedShapes);
+    const next = parsedShapes.length ? parsedShapes : [makeDefaultShape('rect')];
+    commitItems(next);
+    setSelectedId(next[0].id);
+  };
+
+  const updateSelectedShape = (patch: Partial<SvgShape>) => {
+    if (!selectedShape) return;
+    const next = items.map((shape) => (shape.id === selectedShape.id ? { ...shape, ...patch } : shape));
+    commitItems(next);
+  };
+
+  const deleteSelected = () => {
+    if (!selectedShape) return;
+    const next = items.filter((shape) => shape.id !== selectedShape.id);
+    commitItems(next);
+    setSelectedId(next[0]?.id ?? null);
   };
 
   const saveCurrentProject = () => {
-    const doc = { id: crypto.randomUUID(), name: projectName || 'Новый проект', items };
+    const project = { id: crypto.randomUUID(), name: projectName || 'Новый проект', items };
     setProjectList((current) => {
-      const next = [doc, ...current.filter((item) => item.name !== doc.name)];
+      const next = [project, ...current.filter((item) => item.name !== project.name)];
       return next.slice(0, 20);
     });
   };
@@ -117,6 +158,20 @@ function App() {
   const deleteProject = (projectId: string) => {
     setProjectList((current) => current.filter((project) => project.id !== projectId));
   };
+
+  const undo = () => {
+    if (historyCursor === 0) return;
+    setHistoryCursor((cursor) => Math.max(cursor - 1, 0));
+  };
+
+  const redo = () => {
+    if (historyCursor >= history.length - 1) return;
+    setHistoryCursor((cursor) => Math.min(cursor + 1, history.length - 1));
+  };
+
+  useEffect(() => {
+    setItems(history[historyCursor] ?? history[history.length - 1]);
+  }, [history, historyCursor]);
 
   const exportSvg = () => {
     const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
@@ -135,7 +190,9 @@ function App() {
           <span className="brand">SVG Maker KB</span>
         </div>
         <div className="toolbar-actions">
-          <button onClick={() => setItems([makeDefaultShape()])}>Новый холст</button>
+          <button onClick={() => setItems([makeDefaultShape('rect')])}>Новый холст</button>
+          <button onClick={undo} className="ghost">Назад</button>
+          <button onClick={redo} className="ghost">Вперёд</button>
           <button onClick={saveCurrentProject}>Сохранить</button>
           <button onClick={exportSvg}>Экспорт SVG</button>
         </div>
@@ -146,10 +203,10 @@ function App() {
           <div className="section-title">Инструменты</div>
 
           <div className="tool-group">
-            <button className="tool-btn" onClick={() => addShape({ ...makeDefaultShape(), type: 'rect', x: 150, y: 120, width: 220, height: 160 })}>+ прямоугольник</button>
-            <button className="tool-btn" onClick={() => addShape({ ...makeDefaultShape(), type: 'circle', x: 360, y: 250, r: 90, fill: '#fbbf24' })}>+ круг</button>
-            <button className="tool-btn" onClick={() => addShape({ ...makeDefaultShape(), type: 'line', x: 60, y: 260, width: 300, height: 0, stroke: '#111827' })}>+ линия</button>
-            <button className="tool-btn" onClick={() => addShape({ ...makeDefaultShape(), type: 'text', x: 250, y: 260, text: 'Текст', fontSize: 46, fill: '#111827' })}>+ текст</button>
+            <button className="tool-btn" onClick={() => addShape('rect')}>+ прямоугольник</button>
+            <button className="tool-btn" onClick={() => addShape('circle')}>+ круг</button>
+            <button className="tool-btn" onClick={() => addShape('line')}>+ линия</button>
+            <button className="tool-btn" onClick={() => addShape('text')}>+ текст</button>
           </div>
 
           <div className="section-title">Память</div>
@@ -176,7 +233,139 @@ function App() {
 
           {activeTab === 'editor' && (
             <div className="canvas-wrap">
-              <svg viewBox="0 0 800 600" className="canvas" dangerouslySetInnerHTML={{ __html: svgMarkup }} />
+              <svg viewBox="0 0 800 600" className="canvas" role="img" aria-label="SVG preview">
+                <rect width="800" height="600" fill="#ffffff" />
+                {items.map((shape) => {
+                  const isSelected = selectedId === shape.id;
+                  const baseStyle = `fill:${shape.fill};stroke:${shape.stroke};stroke-width:${shape.strokeWidth};opacity:${shape.opacity};`;
+
+                  if (shape.type === 'rect') {
+                    return (
+                      <g key={shape.id} onClick={() => setSelectedId(shape.id)}>
+                        <rect
+                          x={shape.x}
+                          y={shape.y}
+                          width={shape.width}
+                          height={shape.height}
+                          rx={shape.r ?? 0}
+                          style={{
+                            fill: shape.fill,
+                            stroke: isSelected ? '#60a5fa' : shape.stroke,
+                            strokeWidth: isSelected ? Math.max(shape.strokeWidth + 2, 4) : shape.strokeWidth,
+                            opacity: shape.opacity,
+                            cursor: 'pointer',
+                          }}
+                        />
+                        {isSelected && (
+                          <rect
+                            x={shape.x - 4}
+                            y={shape.y - 4}
+                            width={(shape.width ?? 0) + 8}
+                            height={(shape.height ?? 0) + 8}
+                            fill="none"
+                            stroke="#60a5fa"
+                            strokeDasharray="8 6"
+                            pointerEvents="none"
+                          />
+                        )}
+                      </g>
+                    );
+                  }
+
+                  if (shape.type === 'circle') {
+                    return (
+                      <g key={shape.id} onClick={() => setSelectedId(shape.id)}>
+                        <circle
+                          cx={shape.x}
+                          cy={shape.y}
+                          r={shape.r ?? 50}
+                          style={{
+                            fill: shape.fill,
+                            stroke: isSelected ? '#60a5fa' : shape.stroke,
+                            strokeWidth: isSelected ? Math.max(shape.strokeWidth + 2, 4) : shape.strokeWidth,
+                            opacity: shape.opacity,
+                            cursor: 'pointer',
+                          }}
+                        />
+                        {isSelected && (
+                          <circle
+                            cx={shape.x}
+                            cy={shape.y}
+                            r={(shape.r ?? 50) + 8}
+                            fill="none"
+                            stroke="#60a5fa"
+                            strokeDasharray="8 6"
+                            pointerEvents="none"
+                          />
+                        )}
+                      </g>
+                    );
+                  }
+
+                  if (shape.type === 'line') {
+                    return (
+                      <g key={shape.id} onClick={() => setSelectedId(shape.id)}>
+                        <line
+                          x1={shape.x}
+                          y1={shape.y}
+                          x2={shape.x + (shape.width ?? 180)}
+                          y2={shape.y + (shape.height ?? 0)}
+                          style={{
+                            stroke: isSelected ? '#60a5fa' : shape.stroke,
+                            strokeWidth: isSelected ? Math.max(shape.strokeWidth + 2, 4) : shape.strokeWidth,
+                            opacity: shape.opacity,
+                            cursor: 'pointer',
+                          }}
+                        />
+                        {isSelected && (
+                          <line
+                            x1={shape.x - 6}
+                            y1={shape.y - 6}
+                            x2={shape.x + (shape.width ?? 180) + 6}
+                            y2={shape.y + (shape.height ?? 0) + 6}
+                            fill="none"
+                            stroke="#60a5fa"
+                            strokeDasharray="8 6"
+                            pointerEvents="none"
+                          />
+                        )}
+                      </g>
+                    );
+                  }
+
+                  if (shape.type === 'text') {
+                    return (
+                      <g key={shape.id} onClick={() => setSelectedId(shape.id)}>
+                        <text
+                          x={shape.x}
+                          y={shape.y}
+                          fill={isSelected ? '#60a5fa' : shape.fill}
+                          fontSize={shape.fontSize ?? 32}
+                          fontWeight="700"
+                          fontFamily="Arial, sans-serif"
+                          style={{ cursor: 'pointer' }}
+                        >
+                          {shape.text ?? 'Текст'}
+                        </text>
+                        {isSelected && (
+                          <rect
+                            x={shape.x - 18}
+                            y={shape.y - (shape.fontSize ?? 32) - 8}
+                            width={220}
+                            height={(shape.fontSize ?? 32) + 20}
+                            fill="none"
+                            stroke="#60a5fa"
+                            strokeDasharray="8 6"
+                            pointerEvents="none"
+                          />
+                        )}
+                      </g>
+                    );
+                  }
+
+                  return null;
+                })}
+              </svg>
             </div>
           )}
 
@@ -206,13 +395,14 @@ function App() {
           {activeTab === 'ai' && (
             <div className="ai-panel">
               <div className="section-title">AI / PNG</div>
-              <p>Здесь можно подключить позже внешний AI-провайдер, например Pollinations. Пока активен безопасный локальный режим.</p>
+              <p>Поддержка внешнего AI-провайдера будет добавлена позже. Сейчас доступен безопасный локальный режим генерации и синхронизация с SVG-редактором.</p>
               <div className="ai-card">
-                <strong>Функции:</strong>
+                <strong>Сейчас:</strong>
                 <ul>
-                  <li>генерация PNG через сервис</li>
-                  <li>импорт готового изображения</li>
-                  <li>внутренний локальный генератор</li>
+                  <li>локальная генерация фигур</li>
+                  <li>сохранение проекта</li>
+                  <li>экспорт SVG</li>
+                  <li>готовность к PDF / PNG / AI провайдерам</li>
                 </ul>
               </div>
             </div>
@@ -227,12 +417,90 @@ function App() {
           <div className="section-title">Список объектов</div>
           <div className="objects-list">
             {items.map((shape, index) => (
-              <div className="object-item" key={shape.id}>
+              <div
+                className={shape.id === selectedId ? 'object-item selected' : 'object-item'}
+                key={shape.id}
+                onClick={() => setSelectedId(shape.id)}
+              >
                 <span>{index + 1}. {shape.type}</span>
                 <button onClick={() => setItems((current) => current.filter((item) => item.id !== shape.id))}>Удалить</button>
               </div>
             ))}
           </div>
+
+          {selectedShape && (
+            <>
+              <div className="section-title">Выделен: {selectedShape.type}</div>
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">X</label>
+                  <input type="number" value={selectedShape.x} onChange={(event) => updateSelectedShape({ x: Number(event.target.value) })} />
+                </div>
+                <div>
+                  <label className="label">Y</label>
+                  <input type="number" value={selectedShape.y} onChange={(event) => updateSelectedShape({ y: Number(event.target.value) })} />
+                </div>
+              </div>
+
+              {selectedShape.type !== 'line' && selectedShape.type !== 'text' && (
+                <div className="grid-fields">
+                  <div>
+                    <label className="label">Ширина</label>
+                    <input type="number" value={selectedShape.width ?? 0} onChange={(event) => updateSelectedShape({ width: Number(event.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="label">Высота</label>
+                    <input type="number" value={selectedShape.height ?? 0} onChange={(event) => updateSelectedShape({ height: Number(event.target.value) })} />
+                  </div>
+                </div>
+              )}
+
+              {selectedShape.type === 'circle' && (
+                <div>
+                  <label className="label">Радиус</label>
+                  <input type="number" value={selectedShape.r ?? 0} onChange={(event) => updateSelectedShape({ r: Number(event.target.value) })} />
+                </div>
+              )}
+
+              {selectedShape.type === 'text' && (
+                <>
+                  <div>
+                    <label className="label">Текст</label>
+                    <input value={selectedShape.text ?? ''} onChange={(event) => updateSelectedShape({ text: event.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Размер</label>
+                    <input type="number" value={selectedShape.fontSize ?? 32} onChange={(event) => updateSelectedShape({ fontSize: Number(event.target.value) })} />
+                  </div>
+                </>
+              )}
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">Заливка</label>
+                  <input type="color" value={selectedShape.fill} onChange={(event) => updateSelectedShape({ fill: event.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Обводка</label>
+                  <input type="color" value={selectedShape.stroke} onChange={(event) => updateSelectedShape({ stroke: event.target.value })} />
+                </div>
+              </div>
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">Толщина</label>
+                  <input type="number" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
+                </div>
+                <div>
+                  <label className="label">Прозрачность</label>
+                  <input type="range" min="0" max="1" step="0.05" value={selectedShape.opacity} onChange={(event) => updateSelectedShape({ opacity: Number(event.target.value) })} />
+                </div>
+              </div>
+
+              <button className="danger" onClick={deleteSelected}>Удалить выбранный объект</button>
+            </>
+          )}
         </aside>
       </div>
     </div>
@@ -245,7 +513,7 @@ function buildSvgMarkup(items: SvgShape[], width: number, height: number) {
       const style = `fill: ${shape.fill}; stroke: ${shape.stroke}; stroke-width: ${shape.strokeWidth}; opacity: ${shape.opacity};`;
 
       if (shape.type === 'rect') {
-        return `<rect x="${shape.x}" y="${shape.y}" width="${shape.width}" height="${shape.height}" rx="${shape.r ?? 0}" style="${style}" />`;
+        return `<rect x="${shape.x}" y="${shape.y}" width="${shape.width ?? 160}" height="${shape.height ?? 100}" rx="${shape.r ?? 0}" style="${style}" />`;
       }
 
       if (shape.type === 'circle') {
@@ -253,7 +521,7 @@ function buildSvgMarkup(items: SvgShape[], width: number, height: number) {
       }
 
       if (shape.type === 'line') {
-        return `<line x1="${shape.x}" y1="${shape.y}" x2="${shape.x + (shape.width || 180)}" y2="${shape.y + (shape.height || 0)}" style="${style}" />`;
+        return `<line x1="${shape.x}" y1="${shape.y}" x2="${shape.x + (shape.width ?? 180)}" y2="${shape.y + (shape.height ?? 0)}" style="stroke:${shape.stroke};stroke-width:${shape.strokeWidth};opacity:${shape.opacity};" />`;
       }
 
       if (shape.type === 'text') {
@@ -264,7 +532,7 @@ function buildSvgMarkup(items: SvgShape[], width: number, height: number) {
     })
     .join('');
 
-  return `<rect width="100%" height="100%" fill="#ffffff"></rect>${shapes}`;
+  return `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#ffffff"></rect>${shapes}</svg>`;
 }
 
 function escapeHtml(text: string) {

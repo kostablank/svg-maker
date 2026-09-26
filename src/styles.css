@@ -48,6 +48,10 @@ button.ghost {
   border: 1px solid var(--line);
 }
 
+button.danger {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
 button:hover {
   filter: brightness(1.08);
 }
@@ -148,6 +152,11 @@ button:hover {
   padding: 10px 12px;
 }
 
+.object-item.selected {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(96, 165, 250, 0.08);
+}
+
 .project-item button, .object-item button {
   padding: 7px 10px;
   font-size: 0.78rem;
@@ -222,6 +231,15 @@ textarea, input {
   padding: 12px 14px;
 }
 
+input[type='color'] {
+  min-height: 42px;
+  padding: 6px;
+}
+
+input[type='range'] {
+  padding: 0;
+}
+
 textarea {
   resize: vertical;
   min-height: 120px;
@@ -265,6 +283,12 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.grid-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 @media (max-width: 980px) {
