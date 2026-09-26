@@ -1,302 +1,566 @@
-* {
-  box-sizing: border-box;
-}
+import { useEffect, useMemo, useState } from 'react';
+import { makePromptExamples, parsePromptToShapes, type SvgShape } from './parser';
 
-:root {
-  color-scheme: dark;
-  --bg: #0b1020;
-  --panel: #121a2a;
-  --panel-soft: #192235;
-  --line: rgba(148, 163, 184, 0.2);
-  --text: #e5eefb;
-  --muted: #a5b4cf;
-  --brand: #60a5fa;
-  --brand-2: #8b5cf6;
-  --danger: #ef4444;
-  --success: #22c55e;
-}
+const STORAGE_KEY = 'svg-maker-kb-projects';
 
-html, body, #root {
-  margin: 0;
-  min-height: 100%;
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: Inter, 'Segoe UI', sans-serif;
-}
+const makeDefaultShape = (type: SvgShape['type'] = 'rect'): SvgShape => {
+  const base = {
+    id: crypto.randomUUID(),
+    type,
+    x: 120,
+    y: 80,
+    fill: '#4f46e5',
+    stroke: '#1f2937',
+    strokeWidth: 3,
+    opacity: 1,
+    text: 'SVG',
+    fontSize: 42,
+    filter: 'none' as const,
+    rotation: 0,
+    strokeDasharray: undefined,
+    gradient: null,
+  } as SvgShape;
 
-body {
-  min-height: 100vh;
-}
-
-button, input, textarea {
-  font: inherit;
-}
-
-button {
-  background: linear-gradient(135deg, var(--brand), var(--brand-2));
-  color: white;
-  border: none;
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-button.ghost {
-  background: transparent;
-  border: 1px solid var(--line);
-}
-
-button.danger {
-  background: linear-gradient(135deg, #ef4444, #b91c1c);
-}
-
-button:hover {
-  filter: brightness(1.08);
-}
-
-.app-shell {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background:
-    radial-gradient(circle at top left, rgba(96, 165, 250, 0.12), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(139, 92, 246, 0.14), transparent 28%),
-    var(--bg);
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(15, 23, 42, 0.8);
-  backdrop-filter: blur(12px);
-  position: sticky;
-  top: 0;
-  z-index: 30;
-}
-
-.brand {
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  font-size: 1.15rem;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.main-layout {
-  flex: 1;
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(220px, 280px);
-  gap: 16px;
-  padding: 16px;
-}
-
-.sidebar, .canvas-panel {
-  background: rgba(18, 26, 42, 0.9);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  padding: 16px;
-  min-height: 420px;
-}
-
-.left-panel, .right-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.section-title {
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin: 8px 0 0;
-  font-weight: 700;
-}
-
-.tool-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tool-btn {
-  width: 100%;
-  justify-content: center;
-  text-align: center;
-}
-
-.project-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  color: var(--muted);
-}
-
-.project-item, .object-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: rgba(148, 163, 184, 0.08);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-
-.object-item.selected {
-  border-color: rgba(96, 165, 250, 0.7);
-  background: rgba(96, 165, 250, 0.08);
-}
-
-.project-item button, .object-item button {
-  padding: 7px 10px;
-  font-size: 0.78rem;
-}
-
-.canvas-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.tab-bar {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.tab {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--muted);
-}
-
-.tab.active {
-  background: linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(139, 92, 246, 0.2));
-  color: white;
-  border-color: rgba(96, 165, 250, 0.4);
-}
-
-.canvas-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(180deg, rgba(148, 163, 184, 0.04), rgba(15, 23, 42, 0.15));
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  min-height: 420px;
-  padding: 12px;
-}
-
-.canvas,
-.mini-preview svg {
-  width: 100%;
-  height: 100%;
-  max-height: 520px;
-  border-radius: 12px;
-  background: white;
-  box-shadow: 0 20px 35px rgba(15, 23, 42, 0.3);
-}
-
-.prompt-panel,
-.ai-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.label {
-  display: block;
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin-bottom: 6px;
-}
-
-textarea, input {
-  width: 100%;
-  border: 1px solid var(--line);
-  background: rgba(15, 23, 42, 0.7);
-  color: var(--text);
-  border-radius: 12px;
-  padding: 12px 14px;
-}
-
-input[type='color'] {
-  min-height: 42px;
-  padding: 6px;
-}
-
-input[type='range'] {
-  padding: 0;
-}
-
-textarea {
-  resize: vertical;
-  min-height: 120px;
-}
-
-.prompt-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.results-box {
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.65);
-  padding: 12px;
-}
-
-.mini-preview {
-  width: 100%;
-  min-height: 200px;
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.ai-card {
-  border: 1px solid var(--line);
-  background: rgba(96, 165, 250, 0.06);
-  border-radius: 12px;
-  padding: 14px;
-  color: var(--muted);
-}
-
-.ai-card ul {
-  margin: 12px 0 0 20px;
-  padding: 0;
-}
-
-.objects-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.grid-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-@media (max-width: 980px) {
-  .main-layout {
-    grid-template-columns: 1fr;
+  if (type === 'circle') {
+    return { ...base, type: 'circle', x: 360, y: 260, r: 110 };
   }
 
-  .sidebar {
-    min-height: auto;
+  if (type === 'line') {
+    return { ...base, type: 'line', x: 90, y: 250, width: 420, height: 0, stroke: '#111827', fill: '#111827' };
   }
+
+  if (type === 'text') {
+    return { ...base, type: 'text', x: 260, y: 260, fill: '#111827', stroke: '#111827', strokeWidth: 0, fontSize: 48 };
+  }
+
+  return { ...base, type: 'rect', width: 220, height: 140, r: 20 };
+};
+
+const sampleProject = () => ({
+  id: crypto.randomUUID(),
+  name: 'Новый проект',
+  width: 800,
+  height: 600,
+  items: [
+    {
+      id: crypto.randomUUID(),
+      type: 'rect',
+      x: 120,
+      y: 120,
+      width: 260,
+      height: 180,
+      fill: '#4f46e5',
+      stroke: '#1f2937',
+      strokeWidth: 3,
+      r: 24,
+      opacity: 1,
+      text: 'SVG',
+      fontSize: 38,
+      filter: 'shadow',
+      rotation: 0,
+      strokeDasharray: undefined,
+      gradient: null,
+    },
+    {
+      id: crypto.randomUUID(),
+      type: 'circle',
+      x: 540,
+      y: 250,
+      r: 110,
+      fill: '#f59e0b',
+      stroke: '#7c2d12',
+      strokeWidth: 4,
+      opacity: 1,
+      text: '',
+      fontSize: 24,
+      filter: 'none',
+      rotation: 0,
+      strokeDasharray: undefined,
+      gradient: null,
+    },
+  ] as SvgShape[],
+});
+
+const defaultProject = sampleProject();
+
+function App() {
+  const [projectName, setProjectName] = useState(defaultProject.name);
+  const [items, setItems] = useState<SvgShape[]>(defaultProject.items);
+  const [history, setHistory] = useState<SvgShape[][]>([defaultProject.items]);
+  const [historyCursor, setHistoryCursor] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(defaultProject.items[0]?.id ?? null);
+  const [prompt, setPrompt] = useState('красный круг в центре, синий квадрат слева');
+  const [projectList, setProjectList] = useState<Array<{ id: string; name: string; items: SvgShape[] }>>([]);
+  const [activeTab, setActiveTab] = useState<'editor' | 'prompt' | 'ai'>('editor');
+
+  const selectedShape = items.find((shape) => shape.id === selectedId) ?? null;
+
+  const commitItems = (nextItems: SvgShape[]) => {
+    setItems(nextItems);
+    setHistory((prev) => {
+      const trimmed = prev.slice(0, historyCursor + 1);
+      const nextHistory = [...trimmed, nextItems];
+      const limited = nextHistory.slice(-30);
+      setHistoryCursor(limited.length - 1);
+      return limited;
+    });
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as Array<{ id: string; name: string; items: SvgShape[] }>;
+      if (!parsed.length) return;
+
+      const first = parsed[0];
+      setProjectList(parsed);
+      setProjectName(first.name);
+      setItems(first.items);
+      setHistory([first.items]);
+      setHistoryCursor(0);
+      setSelectedId(first.items[0]?.id ?? null);
+    } catch {
+      // ignore invalid JSON
+    }
+  }, []);
+
+  useEffect(() => {
+    const projectDocs = projectList.length ? projectList : [{ id: crypto.randomUUID(), name: projectName || 'Новый проект', items }];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projectDocs));
+  }, [items, projectName, projectList]);
+
+  const svgMarkup = useMemo(() => buildSvgMarkup(items, 800, 600), [items]);
+
+  const addShape = (type: SvgShape['type']) => {
+    const next = [...items, makeDefaultShape(type)];
+    commitItems(next);
+    setSelectedId(next[next.length - 1].id);
+  };
+
+  const generateFromPrompt = () => {
+    const parsedShapes = parsePromptToShapes(prompt);
+    const next = parsedShapes.length ? parsedShapes : [makeDefaultShape('rect')];
+    commitItems(next);
+    setSelectedId(next[0].id);
+  };
+
+  const updateSelectedShape = (patch: Partial<SvgShape>) => {
+    if (!selectedShape) return;
+    const next = items.map((shape) => (shape.id === selectedShape.id ? { ...shape, ...patch } : shape));
+    commitItems(next);
+  };
+
+  const deleteSelected = () => {
+    if (!selectedShape) return;
+    const next = items.filter((shape) => shape.id !== selectedShape.id);
+    commitItems(next);
+    setSelectedId(next[0]?.id ?? null);
+  };
+
+  const saveCurrentProject = () => {
+    const project = { id: crypto.randomUUID(), name: projectName || 'Новый проект', items };
+    setProjectList((current) => {
+      const next = [project, ...current.filter((item) => item.name !== project.name)];
+      return next.slice(0, 20);
+    });
+  };
+
+  const deleteProject = (projectId: string) => {
+    setProjectList((current) => current.filter((project) => project.id !== projectId));
+  };
+
+  const undo = () => {
+    if (historyCursor === 0) return;
+    setHistoryCursor((cursor) => Math.max(cursor - 1, 0));
+  };
+
+  const redo = () => {
+    if (historyCursor >= history.length - 1) return;
+    setHistoryCursor((cursor) => Math.min(cursor + 1, history.length - 1));
+  };
+
+  useEffect(() => {
+    setItems(history[historyCursor] ?? history[history.length - 1]);
+  }, [history, historyCursor]);
+
+  const exportSvg = () => {
+    const blob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(projectName || 'svg-project').replace(/\s+/g, '-').toLowerCase()}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="toolbar">
+        <div>
+          <span className="brand">SVG Maker KB</span>
+        </div>
+        <div className="toolbar-actions">
+          <button onClick={() => setItems([makeDefaultShape('rect')])}>Новый холст</button>
+          <button onClick={undo} className="ghost">Назад</button>
+          <button onClick={redo} className="ghost">Вперёд</button>
+          <button onClick={saveCurrentProject}>Сохранить</button>
+          <button onClick={exportSvg}>Экспорт SVG</button>
+        </div>
+      </header>
+
+      <div className="main-layout">
+        <aside className="sidebar left-panel">
+          <div className="section-title">Инструменты</div>
+
+          <div className="tool-group">
+            <button className="tool-btn" onClick={() => addShape('rect')}>+ прямоугольник</button>
+            <button className="tool-btn" onClick={() => addShape('circle')}>+ круг</button>
+            <button className="tool-btn" onClick={() => addShape('line')}>+ линия</button>
+            <button className="tool-btn" onClick={() => addShape('text')}>+ текст</button>
+          </div>
+
+          <div className="section-title">Память</div>
+          <div className="project-list">
+            {projectList.length === 0 ? (
+              <p>Нет сохранённых проектов</p>
+            ) : (
+              projectList.map((project) => (
+                <div key={project.id} className="project-item">
+                  <span>{project.name}</span>
+                  <button onClick={() => deleteProject(project.id)}>Удалить</button>
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <main className="canvas-panel">
+          <div className="tab-bar">
+            <button className={activeTab === 'editor' ? 'tab active' : 'tab'} onClick={() => setActiveTab('editor')}>Редактор</button>
+            <button className={activeTab === 'prompt' ? 'tab active' : 'tab'} onClick={() => setActiveTab('prompt')}>Генератор</button>
+            <button className={activeTab === 'ai' ? 'tab active' : 'tab'} onClick={() => setActiveTab('ai')}>AI / PNG</button>
+          </div>
+
+          {activeTab === 'editor' && (
+            <div className="canvas-wrap">
+              <svg viewBox="0 0 800 600" className="canvas" role="img" aria-label="SVG preview">
+                {renderShapes(items, selectedId, setSelectedId)}
+              </svg>
+            </div>
+          )}
+
+          {activeTab === 'prompt' && (
+            <div className="prompt-panel">
+              <label className="label">Описание для генерации</label>
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                rows={6}
+                placeholder="Например: красный круг в центре, синий квадрат слева"
+              />
+
+              <div className="prompt-actions">
+                <button onClick={generateFromPrompt}>Генерировать</button>
+                <button className="ghost" onClick={() => setPrompt(makePromptExamples()[0])}>Пример</button>
+              </div>
+
+              <div className="results-box">
+                <div className="mini-preview">
+                  <svg viewBox="0 0 800 600" dangerouslySetInnerHTML={{ __html: buildSvgMarkup(parsePromptToShapes(prompt), 800, 600) }} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'ai' && (
+            <div className="ai-panel">
+              <div className="section-title">AI / PNG</div>
+              <p>Поддержка внешнего AI-провайдера будет добавлена позже. Сейчас доступен безопасный локальный режим генерации и синхронизация с SVG-редактором.</p>
+              <div className="ai-card">
+                <strong>Сейчас:</strong>
+                <ul>
+                  <li>локальная генерация фигур</li>
+                  <li>сохранение проекта</li>
+                  <li>экспорт SVG</li>
+                  <li>готовность к AI провайдерам</li>
+                </ul>
+              </div>
+            </div>
+          )}
+        </main>
+
+        <aside className="sidebar right-panel">
+          <div className="section-title">Свойства проекта</div>
+          <label className="label">Название</label>
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+
+          <div className="section-title">Список объектов</div>
+          <div className="objects-list">
+            {items.map((shape, index) => (
+              <div
+                className={shape.id === selectedId ? 'object-item selected' : 'object-item'}
+                key={shape.id}
+                onClick={() => setSelectedId(shape.id)}
+              >
+                <span>{index + 1}. {shape.type}</span>
+                <button onClick={() => setItems((current) => current.filter((item) => item.id !== shape.id))}>Удалить</button>
+              </div>
+            ))}
+          </div>
+
+          {selectedShape && (
+            <>
+              <div className="section-title">Выделен: {selectedShape.type}</div>
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">X</label>
+                  <input type="number" value={selectedShape.x} onChange={(event) => updateSelectedShape({ x: Number(event.target.value) })} />
+                </div>
+                <div>
+                  <label className="label">Y</label>
+                  <input type="number" value={selectedShape.y} onChange={(event) => updateSelectedShape({ y: Number(event.target.value) })} />
+                </div>
+              </div>
+
+              {selectedShape.type !== 'line' && selectedShape.type !== 'text' && (
+                <div className="grid-fields">
+                  <div>
+                    <label className="label">Ширина</label>
+                    <input type="number" value={selectedShape.width ?? 0} onChange={(event) => updateSelectedShape({ width: Number(event.target.value) })} />
+                  </div>
+                  <div>
+                    <label className="label">Высота</label>
+                    <input type="number" value={selectedShape.height ?? 0} onChange={(event) => updateSelectedShape({ height: Number(event.target.value) })} />
+                  </div>
+                </div>
+              )}
+
+              {selectedShape.type === 'circle' && (
+                <div>
+                  <label className="label">Радиус</label>
+                  <input type="number" value={selectedShape.r ?? 0} onChange={(event) => updateSelectedShape({ r: Number(event.target.value) })} />
+                </div>
+              )}
+
+              {selectedShape.type === 'text' && (
+                <>
+                  <div>
+                    <label className="label">Текст</label>
+                    <input value={selectedShape.text ?? ''} onChange={(event) => updateSelectedShape({ text: event.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Размер</label>
+                    <input type="number" value={selectedShape.fontSize ?? 32} onChange={(event) => updateSelectedShape({ fontSize: Number(event.target.value) })} />
+                  </div>
+                </>
+              )}
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">Заливка</label>
+                  <input type="color" value={selectedShape.fill.startsWith('url(') ? '#4f46e5' : selectedShape.fill} onChange={(event) => updateSelectedShape({ fill: event.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Обводка</label>
+                  <input type="color" value={selectedShape.stroke} onChange={(event) => updateSelectedShape({ stroke: event.target.value })} />
+                </div>
+              </div>
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">Толщина</label>
+                  <input type="number" value={selectedShape.strokeWidth} onChange={(event) => updateSelectedShape({ strokeWidth: Number(event.target.value) })} />
+                </div>
+                <div>
+                  <label className="label">Прозрачность</label>
+                  <input type="range" min="0" max="1" step="0.05" value={selectedShape.opacity} onChange={(event) => updateSelectedShape({ opacity: Number(event.target.value) })} />
+                </div>
+              </div>
+
+              <div className="grid-fields">
+                <div>
+                  <label className="label">Поворот</label>
+                  <input type="number" value={selectedShape.rotation ?? 0} onChange={(event) => updateSelectedShape({ rotation: Number(event.target.value) })} />
+                </div>
+                <div>
+                  <label className="label">Тень</label>
+                  <select value={selectedShape.filter ?? 'none'} onChange={(event) => updateSelectedShape({ filter: event.target.value as 'shadow' | 'none' })}>
+                    <option value="none">Нет</option>
+                    <option value="shadow">Есть</option>
+                  </select>
+                </div>
+              </div>
+
+              <button className="danger" onClick={deleteSelected}>Удалить выбранный объект</button>
+            </>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
 }
+
+function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (id: string) => void) {
+  const directShapes = items.map((shape) => {
+    const isSelected = selectedId === shape.id;
+    const fillColor = shape.gradient ? 'url(#' + shape.gradient.id + ')' : shape.fill;
+    const baseStyles = {
+      fill: fillColor,
+      stroke: isSelected ? '#60a5fa' : shape.stroke,
+      strokeWidth: isSelected ? Math.max(shape.strokeWidth + 2, 4) : shape.strokeWidth,
+      opacity: shape.opacity,
+      cursor: 'pointer',
+      filter: shape.filter === 'shadow' ? 'url(#shadowFilter)' : undefined,
+      strokeDasharray: shape.strokeDasharray,
+      transform: shape.rotation ? `rotate(${shape.rotation} ${shape.x} ${shape.y})` : undefined,
+    } as const;
+
+    if (shape.type === 'rect') {
+      return (
+        <g key={shape.id} onClick={() => onSelect(shape.id)}>
+          <rect
+            x={shape.x}
+            y={shape.y}
+            width={shape.width ?? 160}
+            height={shape.height ?? 100}
+            rx={shape.r ?? 0}
+            {...baseStyles}
+          />
+          {isSelected && <rect x={shape.x - 4} y={shape.y - 4} width={(shape.width ?? 160) + 8} height={(shape.height ?? 100) + 8} fill="none" stroke="#60a5fa" strokeDasharray="8 6" pointerEvents="none" />}
+        </g>
+      );
+    }
+
+    if (shape.type === 'circle') {
+      const cx = shape.x;
+      const cy = shape.y;
+      return (
+        <g key={shape.id} onClick={() => onSelect(shape.id)}>
+          <circle cx={cx} cy={cy} r={shape.r ?? 50} {...baseStyles} />
+          {isSelected && <circle cx={cx} cy={cy} r={(shape.r ?? 50) + 8} fill="none" stroke="#60a5fa" strokeDasharray="8 6" pointerEvents="none" />}
+        </g>
+      );
+    }
+
+    if (shape.type === 'line') {
+      return (
+        <g key={shape.id} onClick={() => onSelect(shape.id)}>
+          <line
+            x1={shape.x}
+            y1={shape.y}
+            x2={shape.x + (shape.width ?? 180)}
+            y2={shape.y + (shape.height ?? 0)}
+            stroke={isSelected ? '#60a5fa' : shape.stroke}
+            strokeWidth={isSelected ? Math.max(shape.strokeWidth + 2, 4) : shape.strokeWidth}
+            opacity={shape.opacity}
+            cursor="pointer"
+            filter={shape.filter === 'shadow' ? 'url(#shadowFilter)' : undefined}
+            strokeDasharray={shape.strokeDasharray}
+            transform={shape.rotation ? `rotate(${shape.rotation} ${shape.x} ${shape.y})` : undefined}
+          />
+        </g>
+      );
+    }
+
+    if (shape.type === 'text') {
+      return (
+        <g key={shape.id} onClick={() => onSelect(shape.id)}>
+          <text
+            x={shape.x}
+            y={shape.y}
+            fill={isSelected ? '#60a5fa' : shape.fill}
+            fontSize={shape.fontSize ?? 32}
+            fontWeight="700"
+            fontFamily="Arial, sans-serif"
+            filter={shape.filter === 'shadow' ? 'url(#shadowFilter)' : undefined}
+            transform={shape.rotation ? `rotate(${shape.rotation} ${shape.x} ${shape.y})` : undefined}
+            style={{ cursor: 'pointer' }}
+          >
+            {shape.text ?? 'Текст'}
+          </text>
+          {isSelected && <rect x={shape.x - 18} y={shape.y - (shape.fontSize ?? 32) - 8} width={220} height={(shape.fontSize ?? 32) + 20} fill="none" stroke="#60a5fa" strokeDasharray="8 6" pointerEvents="none" />}
+        </g>
+      );
+    }
+
+    return null;
+  });
+
+  return (
+    <>
+      <defs>
+        <filter id="shadowFilter">
+          <feDropShadow dx="0" dy="8" stdDeviation="6" floodColor="#000000" floodOpacity="0.28" />
+        </filter>
+      </defs>
+      <rect width="800" height="600" fill="#ffffff" />
+      {directShapes}
+    </>
+  );
+}
+
+function buildSvgMarkup(items: SvgShape[], width: number, height: number) {
+  const gradients: string[] = [];
+  const shapes = items
+    .map((shape) => {
+      const fillValue = shape.gradient ? `url(#${shape.gradient.id})` : shape.fill;
+      const transform = shape.rotation ? ` transform="rotate(${shape.rotation} ${shape.x} ${shape.y})"` : '';
+      const shadow = shape.filter === 'shadow' ? ' filter="url(#shadowFilter)"' : '';
+      const dash = shape.strokeDasharray ? ` stroke-dasharray="${shape.strokeDasharray}"` : '';
+
+      if (shape.gradient) {
+        gradients.push(`
+          <linearGradient id="${shape.gradient.id}" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="${shape.gradient.from}" />
+            <stop offset="100%" stop-color="${shape.gradient.to}" />
+          </linearGradient>
+        `);
+      }
+
+      if (shape.type === 'rect') {
+        return `<rect x="${shape.x}" y="${shape.y}" width="${shape.width ?? 160}" height="${shape.height ?? 100}" rx="${shape.r ?? 0}" fill="${fillValue}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}" opacity="${shape.opacity}"${dash}${shadow}${transform} />`;
+      }
+
+      if (shape.type === 'circle') {
+        return `<circle cx="${shape.x}" cy="${shape.y}" r="${shape.r ?? 50}" fill="${fillValue}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}" opacity="${shape.opacity}"${dash}${shadow}${transform} />`;
+      }
+
+      if (shape.type === 'line') {
+        return `<line x1="${shape.x}" y1="${shape.y}" x2="${shape.x + (shape.width ?? 180)}" y2="${shape.y + (shape.height ?? 0)}" stroke="${shape.stroke}" stroke-width="${shape.strokeWidth}" opacity="${shape.opacity}"${dash}${shadow}${transform} />`;
+      }
+
+      if (shape.type === 'text') {
+        return `<text x="${shape.x}" y="${shape.y}" fill="${shape.fill}" font-size="${shape.fontSize ?? 32}" font-family="Arial, sans-serif" font-weight="700"${shadow}${transform}>${escapeHtml(shape.text || 'Текст')}</text>`;
+      }
+
+      return '';
+    })
+    .join('');
+
+  return `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="shadowFilter">
+          <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.28" />
+        </filter>
+        ${gradients.join('')}
+      </defs>
+      <rect width="100%" height="100%" fill="#ffffff"></rect>
+      ${shapes}
+    </svg>
+  `;
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export default App;
