@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { makePromptExamples, parsePromptToShapes, sortByLayer, type SvgShape } from './parser';
+import { getStylePresetLabel, makePromptExamples, parsePromptToShapes, sortByLayer, type StylePreset, type SvgShape } from './parser';
 
 const STORAGE_KEY = 'svg-maker-kb-projects';
 
@@ -96,6 +96,7 @@ function App() {
   const [projectList, setProjectList] = useState<Array<{ id: string; name: string; items: SvgShape[] }>>([]);
   const [activeTab, setActiveTab] = useState<'editor' | 'prompt' | 'ai'>('editor');
   const [dragInfo, setDragInfo] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const [stylePreset, setStylePreset] = useState<StylePreset>('minimal');
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const selectedShape = items.find((shape) => shape.id === selectedId) ?? null;
@@ -147,7 +148,7 @@ function App() {
   };
 
   const generateFromPrompt = () => {
-    const parsedShapes = parsePromptToShapes(prompt).map((shape, index) => ({ ...shape, layer: shape.layer ?? index + 1 }));
+    const parsedShapes = parsePromptToShapes(prompt, stylePreset).map((shape, index) => ({ ...shape, layer: shape.layer ?? index + 1 }));
     const next = parsedShapes.length ? parsedShapes : [{ ...makeDefaultShape('rect'), layer: 1 }];
     commitItems(next);
     setSelectedId(next[0].id);
@@ -336,6 +337,19 @@ function App() {
                 placeholder="Например: красный круг в центре, синий квадрат слева"
               />
 
+              <div className="style-preset-row">
+                {(['minimal', 'modern', 'glass', 'outline', 'shadow'] as StylePreset[]).map((preset) => (
+                  <button
+                    key={preset}
+                    className={stylePreset === preset ? 'preset-button active' : 'preset-button'}
+                    onClick={() => setStylePreset(preset)}
+                    type="button"
+                  >
+                    {getStylePresetLabel(preset)}
+                  </button>
+                ))}
+              </div>
+
               <div className="prompt-actions">
                 <button onClick={generateFromPrompt}>Генерировать</button>
                 <button className="ghost" onClick={() => setPrompt(makePromptExamples()[0])}>Пример</button>
@@ -343,7 +357,7 @@ function App() {
 
               <div className="results-box">
                 <div className="mini-preview">
-                  <svg viewBox="0 0 800 600" dangerouslySetInnerHTML={{ __html: buildSvgMarkup(parsePromptToShapes(prompt), 800, 600) }} />
+                  <svg viewBox="0 0 800 600" dangerouslySetInnerHTML={{ __html: buildSvgMarkup(parsePromptToShapes(prompt, stylePreset), 800, 600) }} />
                 </div>
               </div>
             </div>
