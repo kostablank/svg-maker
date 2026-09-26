@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { makePromptExamples, parsePromptToShapes, type SvgShape } from './parser';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { makePromptExamples, parsePromptToShapes, sortByLayer, type SvgShape } from './parser';
 
 const STORAGE_KEY = 'svg-maker-kb-projects';
 
@@ -19,21 +19,22 @@ const makeDefaultShape = (type: SvgShape['type'] = 'rect'): SvgShape => {
     rotation: 0,
     strokeDasharray: undefined,
     gradient: null,
+    layer: 1,
   } as SvgShape;
 
   if (type === 'circle') {
-    return { ...base, type: 'circle', x: 360, y: 260, r: 110 };
+    return { ...base, type: 'circle', x: 360, y: 260, r: 110, layer: 2 };
   }
 
   if (type === 'line') {
-    return { ...base, type: 'line', x: 90, y: 250, width: 420, height: 0, stroke: '#111827', fill: '#111827' };
+    return { ...base, type: 'line', x: 90, y: 250, width: 420, height: 0, stroke: '#111827', fill: '#111827', layer: 3 };
   }
 
   if (type === 'text') {
-    return { ...base, type: 'text', x: 260, y: 260, fill: '#111827', stroke: '#111827', strokeWidth: 0, fontSize: 48 };
+    return { ...base, type: 'text', x: 260, y: 260, fill: '#111827', stroke: '#111827', strokeWidth: 0, fontSize: 48, layer: 4 };
   }
 
-  return { ...base, type: 'rect', width: 220, height: 140, r: 20 };
+  return { ...base, type: 'rect', width: 220, height: 140, r: 20, layer: 1 };
 };
 
 const sampleProject = () => ({
@@ -60,6 +61,7 @@ const sampleProject = () => ({
       rotation: 0,
       strokeDasharray: undefined,
       gradient: null,
+      layer: 1,
     },
     {
       id: crypto.randomUUID(),
@@ -77,6 +79,7 @@ const sampleProject = () => ({
       rotation: 0,
       strokeDasharray: undefined,
       gradient: null,
+      layer: 2,
     },
   ] as SvgShape[],
 });
@@ -92,14 +95,17 @@ function App() {
   const [prompt, setPrompt] = useState('красный круг в центре, синий квадрат слева');
   const [projectList, setProjectList] = useState<Array<{ id: string; name: string; items: SvgShape[] }>>([]);
   const [activeTab, setActiveTab] = useState<'editor' | 'prompt' | 'ai'>('editor');
+  const [dragInfo, setDragInfo] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   const selectedShape = items.find((shape) => shape.id === selectedId) ?? null;
 
   const commitItems = (nextItems: SvgShape[]) => {
-    setItems(nextItems);
+    const ordered = sortByLayer(nextItems);
+    setItems(ordered);
     setHistory((prev) => {
       const trimmed = prev.slice(0, historyCursor + 1);
-      const nextHistory = [...trimmed, nextItems];
+      const nextHistory = [...trimmed, ordered];
       const limited = nextHistory.slice(-30);
       setHistoryCursor(limited.length - 1);
       return limited;
@@ -115,12 +121,13 @@ function App() {
       if (!parsed.length) return;
 
       const first = parsed[0];
+      const withLayers = sortByLayer(first.items).map((shape, index) => ({ ...shape, layer: shape.layer ?? index + 1 }));
       setProjectList(parsed);
       setProjectName(first.name);
-      setItems(first.items);
-      setHistory([first.items]);
+      setItems(withLayers);
+      setHistory([withLayers]);
       setHistoryCursor(0);
-      setSelectedId(first.items[0]?.id ?? null);
+      setSelectedId(withLayers[0]?.id ?? null);
     } catch {
       // ignore invalid JSON
     }
@@ -131,17 +138,17 @@ function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(projectDocs));
   }, [items, projectName, projectList]);
 
-  const svgMarkup = useMemo(() => buildSvgMarkup(items, 800, 600), [items]);
+  const svgMarkup = useMemo(() => buildSvgMarkup(sortByLayer(items), 800, 600), [items]);
 
   const addShape = (type: SvgShape['type']) => {
-    const next = [...items, makeDefaultShape(type)];
+    const next = [...items, { ...makeDefaultShape(type), layer: Math.max(...items.map((shape) => shape.layer ?? 0), 0) + 1 }];
     commitItems(next);
     setSelectedId(next[next.length - 1].id);
   };
 
   const generateFromPrompt = () => {
-    const parsedShapes = parsePromptToShapes(prompt);
-    const next = parsedShapes.length ? parsedShapes : [makeDefaultShape('rect')];
+    const parsedShapes = parsePromptToShapes(prompt).map((shape, index) => ({ ...shape, layer: shape.layer ?? index + 1 }));
+    const next = parsedShapes.length ? parsedShapes : [{ ...makeDefaultShape('rect'), layer: 1 }];
     commitItems(next);
     setSelectedId(next[0].id);
   };
@@ -160,7 +167,7 @@ function App() {
   };
 
   const saveCurrentProject = () => {
-    const project = { id: crypto.randomUUID(), name: projectName || 'Новый проект', items };
+    const project = { id: crypto.randomUUID(), name: projectName || 'Новый проект', items: sortByLayer(items) };
     setProjectList((current) => {
       const next = [project, ...current.filter((item) => item.name !== project.name)];
       return next.slice(0, 20);
@@ -182,7 +189,7 @@ function App() {
   };
 
   useEffect(() => {
-    setItems(history[historyCursor] ?? history[history.length - 1]);
+    setItems(sortByLayer(history[historyCursor] ?? history[history.length - 1] ?? []));
   }, [history, historyCursor]);
 
   const exportSvg = () => {
@@ -193,6 +200,74 @@ function App() {
     a.download = `${(projectName || 'svg-project').replace(/\s+/g, '-').toLowerCase()}.svg`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const moveLayer = (direction: 'up' | 'down') => {
+    if (!selectedShape) return;
+    const ordered = sortByLayer(items);
+    const currentIndex = ordered.findIndex((shape) => shape.id === selectedShape.id);
+    if (currentIndex < 0) return;
+
+    const targetIndex = direction === 'up' ? currentIndex + 1 : currentIndex - 1;
+    if (targetIndex < 0 || targetIndex >= ordered.length) return;
+
+    const next = [...ordered];
+    const [item] = next.splice(currentIndex, 1);
+    next.splice(targetIndex, 0, item);
+
+    const nextWithLayers = next.map((shape, index) => ({ ...shape, layer: index + 1 }));
+    commitItems(nextWithLayers);
+    setSelectedId(item.id);
+  };
+
+  useEffect(() => {
+    if (!dragInfo) return;
+
+    const onPointerMove = (event: PointerEvent) => {
+      const svg = svgRef.current;
+      if (!svg || !selectedId) return;
+      const rect = svg.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 800;
+      const y = ((event.clientY - rect.top) / rect.height) * 600;
+
+      setItems((current) =>
+        sortByLayer(
+          current.map((shape) =>
+            shape.id === dragInfo.id
+              ? {
+                  ...shape,
+                  x: Math.max(0, Math.min(800, x - dragInfo.offsetX)),
+                  y: Math.max(0, Math.min(600, y - dragInfo.offsetY)),
+                }
+              : shape,
+          ),
+        ),
+      );
+    };
+
+    const onPointerUp = () => setDragInfo(null);
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [dragInfo, selectedId]);
+
+  const startDrag = (shape: SvgShape, event: React.PointerEvent<SVGElement>) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 800;
+    const y = ((event.clientY - rect.top) / rect.height) * 600;
+    setSelectedId(shape.id);
+    setDragInfo({
+      id: shape.id,
+      offsetX: x - shape.x,
+      offsetY: y - shape.y,
+    });
   };
 
   return (
@@ -245,8 +320,8 @@ function App() {
 
           {activeTab === 'editor' && (
             <div className="canvas-wrap">
-              <svg viewBox="0 0 800 600" className="canvas" role="img" aria-label="SVG preview">
-                {renderShapes(items, selectedId, setSelectedId)}
+              <svg ref={svgRef} viewBox="0 0 800 600" className="canvas" role="img" aria-label="SVG preview">
+                {renderShapes(items, selectedId, setSelectedId, startDrag)}
               </svg>
             </div>
           )}
@@ -298,7 +373,7 @@ function App() {
 
           <div className="section-title">Список объектов</div>
           <div className="objects-list">
-            {items.map((shape, index) => (
+            {sortByLayer(items).map((shape, index) => (
               <div
                 className={shape.id === selectedId ? 'object-item selected' : 'object-item'}
                 key={shape.id}
@@ -313,6 +388,11 @@ function App() {
           {selectedShape && (
             <>
               <div className="section-title">Выделен: {selectedShape.type}</div>
+
+              <div className="layer-controls">
+                <button className="ghost" onClick={() => moveLayer('up')}>Слой вверх</button>
+                <button className="ghost" onClick={() => moveLayer('down')}>Слой вниз</button>
+              </div>
 
               <div className="grid-fields">
                 <div>
@@ -403,8 +483,13 @@ function App() {
   );
 }
 
-function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (id: string) => void) {
-  const directShapes = items.map((shape) => {
+function renderShapes(
+  items: SvgShape[],
+  selectedId: string | null,
+  onSelect: (id: string) => void,
+  onPointerDown: (shape: SvgShape, event: React.PointerEvent<SVGElement>) => void,
+) {
+  const directShapes = sortByLayer(items).map((shape) => {
     const isSelected = selectedId === shape.id;
     const fillColor = shape.gradient ? 'url(#' + shape.gradient.id + ')' : shape.fill;
     const baseStyles = {
@@ -428,6 +513,7 @@ function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (i
             height={shape.height ?? 100}
             rx={shape.r ?? 0}
             {...baseStyles}
+            onPointerDown={(event) => onPointerDown(shape, event)}
           />
           {isSelected && <rect x={shape.x - 4} y={shape.y - 4} width={(shape.width ?? 160) + 8} height={(shape.height ?? 100) + 8} fill="none" stroke="#60a5fa" strokeDasharray="8 6" pointerEvents="none" />}
         </g>
@@ -439,7 +525,13 @@ function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (i
       const cy = shape.y;
       return (
         <g key={shape.id} onClick={() => onSelect(shape.id)}>
-          <circle cx={cx} cy={cy} r={shape.r ?? 50} {...baseStyles} />
+          <circle
+            cx={cx}
+            cy={cy}
+            r={shape.r ?? 50}
+            {...baseStyles}
+            onPointerDown={(event) => onPointerDown(shape, event)}
+          />
           {isSelected && <circle cx={cx} cy={cy} r={(shape.r ?? 50) + 8} fill="none" stroke="#60a5fa" strokeDasharray="8 6" pointerEvents="none" />}
         </g>
       );
@@ -460,6 +552,7 @@ function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (i
             filter={shape.filter === 'shadow' ? 'url(#shadowFilter)' : undefined}
             strokeDasharray={shape.strokeDasharray}
             transform={shape.rotation ? `rotate(${shape.rotation} ${shape.x} ${shape.y})` : undefined}
+            onPointerDown={(event) => onPointerDown(shape, event)}
           />
         </g>
       );
@@ -478,6 +571,7 @@ function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (i
             filter={shape.filter === 'shadow' ? 'url(#shadowFilter)' : undefined}
             transform={shape.rotation ? `rotate(${shape.rotation} ${shape.x} ${shape.y})` : undefined}
             style={{ cursor: 'pointer' }}
+            onPointerDown={(event) => onPointerDown(shape, event)}
           >
             {shape.text ?? 'Текст'}
           </text>
@@ -504,7 +598,7 @@ function renderShapes(items: SvgShape[], selectedId: string | null, onSelect: (i
 
 function buildSvgMarkup(items: SvgShape[], width: number, height: number) {
   const gradients: string[] = [];
-  const shapes = items
+  const shapes = sortByLayer(items)
     .map((shape) => {
       const fillValue = shape.gradient ? `url(#${shape.gradient.id})` : shape.fill;
       const transform = shape.rotation ? ` transform="rotate(${shape.rotation} ${shape.x} ${shape.y})"` : '';

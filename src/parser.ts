@@ -16,6 +16,7 @@ export type SvgShape = {
   rotation?: number;
   strokeDasharray?: string;
   gradient?: { id: string; type: 'linear' | 'radial'; from: string; to: string } | null;
+  layer?: number;
 };
 
 const colorMap: Record<string, string> = {
@@ -57,9 +58,9 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
   const hasRect = normalized.includes('квадрат') || normalized.includes('прямоугольник') || normalized.includes('rectangle') || normalized.includes('rect');
   const hasLine = normalized.includes('линия') || normalized.includes('line');
   const hasText = normalized.includes('текст') || normalized.includes('text');
-  const useOutline = normalized.includes('outline') || normalized.includes('обводка') || normalized.includes('outline') || normalized.includes('контур');
+  const useOutline = normalized.includes('outline') || normalized.includes('обводка') || normalized.includes('контур');
   const useGradient = normalized.includes('градиент') || normalized.includes('gradient');
-  const useShadow = normalized.includes('тень') || normalized.includes('shadow') || normalized.includes('shadow');
+  const useShadow = normalized.includes('тень') || normalized.includes('shadow');
   const isDashed = normalized.includes('пунктир') || normalized.includes('dashed');
   const fill = extractColor(normalized);
 
@@ -84,6 +85,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
     rotation: 0,
     text: '',
     fontSize: 36,
+    layer: 0,
   });
 
   if (hasCircle) {
@@ -95,6 +97,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
       fill: useGradient ? `url(#grad-circle)` : fill,
       stroke: '#111827',
       gradient: useGradient ? createGradient('grad-circle', fill, '#0f172a') : null,
+      layer: 2,
     });
   }
 
@@ -110,6 +113,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
       strokeWidth: useOutline ? 5 : 3,
       r: 20,
       gradient: useGradient ? createGradient('grad-rect', '#60a5fa', '#1d4ed8') : null,
+      layer: 1,
     });
   }
 
@@ -125,6 +129,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
       strokeWidth: useOutline ? 6 : 5,
       filter: useShadow ? 'shadow' : 'none',
       strokeDasharray: isDashed ? '8 6' : undefined,
+      layer: 3,
     });
   }
 
@@ -139,6 +144,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
       text: 'SVG',
       fontSize: 52,
       filter: useShadow ? 'shadow' : 'none',
+      layer: 4,
     });
   }
 
@@ -160,6 +166,7 @@ export function parsePromptToShapes(prompt: string): SvgShape[] {
       rotation: 0,
       strokeDasharray: undefined,
       gradient: null,
+      layer: 1,
     });
   }
 
@@ -173,4 +180,8 @@ export function makePromptExamples() {
     'зелёный прямоугольник с градиентом, тень, обводка 4px',
     'текст SVG в центре, белый фон, чёрная обводка',
   ];
+}
+
+export function sortByLayer(items: SvgShape[]) {
+  return [...items].sort((a, b) => (a.layer ?? 0) - (b.layer ?? 0));
 }
